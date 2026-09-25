@@ -372,6 +372,30 @@ body::before {
   align-items: stretch;
   z-index: 200;
 }
+
+/* Kept above navigation so a driver can send a handover without changing screens. */
+.whatsapp-all-btn {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+  z-index: 210;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 46px;
+  padding: 0 15px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 24px;
+  background: #25D366;
+  color: #052d16;
+  font-family: var(--font-main);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  cursor: pointer;
+}
+.whatsapp-all-btn:active { transform: scale(.97); }
+@media (min-width: 481px) { .whatsapp-all-btn { right: calc(50% - 226px); } }
 .nav-item {
   flex: 1;
   display: flex;

@@ -94,6 +94,11 @@
   <button class="nav-item"        data-sec="finance"    onclick="navigate('finance')"><span class="nav-icon">💸</span><span class="nav-label">FINANCE</span></button>
 </nav>
 
+<!-- Quick manual handover. Opens WhatsApp with a reviewable report; never sends automatically. -->
+<button id="whatsapp-all-btn" class="whatsapp-all-btn" onclick="shareAllDataToWhatsApp()" aria-label="Prepare all records for WhatsApp">
+  <span>💬</span><span>Send records</span>
+</button>
+
 <!-- ===== MODAL: ADD PRODUCTION ===== -->
 <div id="modal-prod" class="modal-overlay">
   <div class="modal">

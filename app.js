@@ -8,6 +8,7 @@
 const BACKUP_EMAIL = 'nsupure.adumasa@gmail.com';
 const WA_NUMBERS = ['233248837001', '233551086492', '233249737654'];
 const WA_NAMES   = ['Main Line', 'Line 2', 'Line 3'];
+const HANDOVER_WHATSAPP = '233248837001'; // 0248837001 in international format
 
 // ===== UTILS =====
 function uuid() { return Date.now().toString(36) + Math.random().toString(36).substr(2,9); }
@@ -1077,6 +1078,43 @@ function sendWhatsApp(number, date) {
   const url=`https://wa.me/${number}?text=${encodeURIComponent(buildReportText(date||today()))}`;
   window.open(url,'_blank');
   showToast('📱 Opening WhatsApp...','success');
+}
+
+function buildAllRecordsText() {
+  const data = DB.load();
+  const active = key => (data[key] || []).filter(item => !item.voidedAt);
+  const lines = [
+    '💧 *NSUPURE WATER — FULL RECORD HANDOVER*',
+    `Generated: ${new Date().toLocaleString('en-GH')}`,
+    '━━━━━━━━━━━━━━━━━━━━',
+  ];
+  const add = (title, records, formatter) => {
+    lines.push(`\n*${title} (${records.length})*`);
+    if (!records.length) { lines.push('None recorded'); return; }
+    records.forEach((record, index) => lines.push(`${index + 1}. ${formatter(record)}`));
+  };
+  add('PRODUCTION', active('productions'), p => `${formatDate(p.date)} | Roll ${p.roll} | ${formatNum(p.bags)} bags${p.notes ? ` | ${p.notes}` : ''}`);
+  add('LOADING', active('loadings'), l => `${formatDate(l.date)} | ${l.vehicle} | ${formatNum(l.bags)} bags${l.destination ? ` → ${l.destination}` : ''}${l.notes ? ` | ${l.notes}` : ''}`);
+  add('ORDERS', active('orders'), o => `${formatDate(o.date)} | ${o.customerName} | ${formatNum(o.bags)} bags | ${o.status} | paid ${formatMoney(o.amountPaid)}`);
+  add('DEBTORS / CREDIT', active('debtors').filter(d => !d.settled), d => `${formatDate(d.date)} | ${d.name} | ${d.type === 'owes_money' ? formatMoney(d.amount) : `${formatNum(d.bags)} bags`}${d.description ? ` | ${d.description}` : ''}`);
+  add('CUSTOMERS', active('customers'), c => `${c.name}${c.phone ? ` | ${c.phone}` : ''}`);
+  lines.push('\n━━━━━━━━━━━━━━━━━━━━', `Current stock: *${formatNum(computeGlobalStock())} bags*`, 'Prepared by NSUPURE Manager');
+  return lines.join('\n');
+}
+
+function shareAllDataToWhatsApp() {
+  const data = DB.load();
+  const total = ['productions','loadings','orders','debtors','customers'].reduce((sum, key) => sum + (data[key] || []).filter(item => !item.voidedAt).length, 0);
+  if (!total) return showToast('There are no active records to share yet.','error');
+  const text = buildAllRecordsText();
+  const maxSafeLength = 55_000;
+  if (text.length > maxSafeLength) {
+    showToast('Too many records for one WhatsApp message. Use JSON Backup for the complete archive.','error');
+    return;
+  }
+  if (!confirm(`Prepare ${total} active record(s) for WhatsApp number 0248837001? You can review the message before sending.`)) return;
+  window.open(`https://wa.me/${HANDOVER_WHATSAPP}?text=${encodeURIComponent(text)}`, '_blank');
+  showToast('📱 WhatsApp opened — review and send when ready.','success');
 }
 function sendGmail(date) {
   const text=buildReportText(date||today());
