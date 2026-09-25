@@ -31,16 +31,68 @@ function formatMoney(n) { return 'GH₵ ' + parseFloat(n||0).toFixed(2); }
 // ===== DATA LAYER =====
 const DB = {
   KEY: 'nsupure_v1',
+  VERSION: 2,
   load() {
-    try { const r = localStorage.getItem(this.KEY); return r ? JSON.parse(r) : this.defaultData(); }
-    catch { return this.defaultData(); }
+    try {
+      const r = localStorage.getItem(this.KEY);
+      const data = r ? JSON.parse(r) : this.defaultData();
+      return this.migrate(data);
+    } catch {
+      // Never overwrite an unreadable local copy. The user can still export it from
+      // browser storage before choosing a recovery action.
+      return this.defaultData();
+    }
   },
   save(data) { localStorage.setItem(this.KEY, JSON.stringify(data)); updateNavBadges(); },
-  defaultData() { return { productions:[], loadings:[], customers:[], orders:[], debtors:[], lastBackup:null }; },
-  get(key)         { return this.load()[key] || []; },
-  add(key, item)   { const d=this.load(); d[key]=[item,...(d[key]||[])]; this.save(d); },
-  update(key,id,upd){ const d=this.load(); d[key]=(d[key]||[]).map(i=>i.id===id?{...i,...upd}:i); this.save(d); },
-  remove(key,id)   { const d=this.load(); d[key]=(d[key]||[]).filter(i=>i.id!==id); this.save(d); },
+  defaultData() { return { schemaVersion:this.VERSION, productions:[], loadings:[], customers:[], orders:[], debtors:[], audit:[], lastBackup:null }; },
+  migrate(data) {
+    const safe = { ...this.defaultData(), ...data };
+    ['productions','loadings','customers','orders','debtors','audit'].forEach(key => {
+      if (!Array.isArray(safe[key])) safe[key] = [];
+    });
+    if (!data.schemaVersion || data.schemaVersion < this.VERSION) {
+      safe.schemaVersion = this.VERSION;
+      safe.audit.unshift({ id:uuid(), action:'MIGRATION', entity:'database', at:Date.now(), note:'Upgraded local records to recoverable deletion format.' });
+      localStorage.setItem(this.KEY, JSON.stringify(safe));
+    }
+    return safe;
+  },
+  get(key)         { return (this.load()[key] || []).filter(item => !item.voidedAt); },
+  getAll(key)      { return this.load()[key] || []; },
+  audit(data, action, entity, id, note='') {
+    data.audit = data.audit || [];
+    data.audit.unshift({ id:uuid(), action, entity, entityId:id, at:Date.now(), note });
+    data.audit = data.audit.slice(0, 500);
+  },
+  add(key, item) {
+    const d=this.load(); const record={...item, version:1, updatedAt:Date.now()};
+    d[key]=[record,...(d[key]||[])]; this.audit(d,'CREATE',key,record.id); this.save(d); Sync.enqueue(key,'CREATE',record);
+  },
+  update(key,id,upd, note='') {
+    const d=this.load(); let changed=false;
+    d[key]=(d[key]||[]).map(i=>i.id===id ? (changed=true,{...i,...upd,version:(i.version||1)+1,updatedAt:Date.now()}) : i);
+    if (changed) { this.audit(d,'UPDATE',key,id,note); this.save(d); Sync.enqueue(key,'UPDATE',(d[key]||[]).find(i=>i.id===id)); }
+  },
+  remove(key,id,reason='Removed from active records') {
+    const d=this.load(); let changed=false;
+    d[key]=(d[key]||[]).map(i=>i.id===id ? (changed=true,{...i,voidedAt:Date.now(),voidReason:reason,version:(i.version||1)+1,updatedAt:Date.now()}) : i);
+    if (changed) { this.audit(d,'VOID',key,id,reason); this.save(d); Sync.enqueue(key,'VOID',(d[key]||[]).find(i=>i.id===id)); }
+  },
+  restore(key,id,reason='Restored to active records') {
+    const d=this.load(); let changed=false;
+    d[key]=(d[key]||[]).map(i=>i.id===id ? (changed=true,{...i,voidedAt:null,voidReason:null,version:(i.version||1)+1,updatedAt:Date.now()}) : i);
+    if (changed) { this.audit(d,'RESTORE',key,id,reason); this.save(d); Sync.enqueue(key,'RESTORE',(d[key]||[]).find(i=>i.id===id)); }
+  },
+  applyRemote(event) {
+    const d=this.load(); const records=d[event.entity];
+    if (!Array.isArray(records) || !event.payload?.id) return;
+    const index=records.findIndex(item=>item.id===event.entityId);
+    const local=index >= 0 ? records[index] : null;
+    if (local && (local.updatedAt || 0) > (event.payload.updatedAt || 0)) return;
+    if (index >= 0) records[index]={...local,...event.payload}; else records.unshift(event.payload);
+    this.audit(d,'SYNC',event.entity,event.entityId,`Received ${event.action} from another device`);
+    this.save(d);
+  },
   setMeta(key,val) { const d=this.load(); d[key]=val; this.save(d); }
 };
 
@@ -65,7 +117,10 @@ function showToast(msg, type='') {
 
 // ===== MODAL =====
 function openModal(id) { document.getElementById(id).classList.add('open'); document.body.style.overflow='hidden'; }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); document.body.style.overflow=''; }
+function closeModal(id){
+  document.getElementById(id).classList.remove('open'); document.body.style.overflow='';
+  if (id === 'modal-prod') editingProductionId = null;
+}
 document.addEventListener('click', e => {
   if (e.target.classList.contains('modal-overlay')) { e.target.classList.remove('open'); document.body.style.overflow=''; }
 });
@@ -179,6 +234,14 @@ function renderDashboard() {
       </div>
     </div>
 
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <span id="sync-status" style="font-size:13px;color:var(--text-dim);">☁️ Checking sync status…</span>
+      <span style="display:flex;gap:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="openModal('modal-sync')">Connect</button>
+        <button class="btn btn-cyan btn-sm" onclick="Sync.sync()">Sync now</button>
+      </span>
+    </div>
+
     ${todayProd>0 ? `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -231,6 +294,8 @@ function renderDashboard() {
 // PRODUCTION
 // ===========================
 let prodFilterDate = today();
+let editingProductionId = null;
+let showDeletedProductions = false;
 function renderProduction(fd) {
   if (fd !== undefined) prodFilterDate = fd;
   const all   = DB.get('productions');
@@ -239,9 +304,10 @@ function renderProduction(fd) {
 
   document.getElementById('sec-production').innerHTML = `
     <div class="section-title"><span class="icon">🏭</span> Production</div>
-    <button class="btn btn-primary" onclick="openModal('modal-prod')" style="margin-bottom:14px;">➕ Record Production</button>
+    <button class="btn btn-primary" onclick="openProductionEditor()" style="margin-bottom:14px;">➕ Record Production</button>
 
     ${makeDateFilter(prodFilterDate,'renderProduction',true)}
+    <button class="btn btn-ghost btn-sm" onclick="showDeletedProductions=!showDeletedProductions;renderProduction()" style="margin-top:8px;">${showDeletedProductions?'Hide removed records':'View removed records'}</button>
 
     ${shown.length>0 ? `
     <div class="card summary-box" style="margin-top:10px;">
@@ -270,10 +336,19 @@ function renderProduction(fd) {
             ${p.notes?`<span>📝 ${p.notes}</span>`:''}
           </div>
           <div class="list-item-actions">
-            <button class="btn btn-danger btn-sm" onclick="deleteProd('${p.id}')">🗑 Delete</button>
+            <button class="btn btn-ghost btn-sm" onclick="openProductionEditor('${p.id}')">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteProd('${p.id}')">🗑 Remove</button>
           </div>
         </div>`).join('')}
     </div>`;
+  if (showDeletedProductions) {
+    const removed = DB.getAll('productions').filter(p=>p.voidedAt);
+    document.getElementById('sec-production').insertAdjacentHTML('beforeend', removed.length ? `
+      <div class="card" style="margin-top:12px;border-color:rgba(255,193,7,.4)">
+        <div class="report-title">Recoverable production records</div>
+        ${removed.map(p=>`<div class="summary-row"><span class="label">${formatDate(p.date)} · Roll ${p.roll} · ${formatNum(p.bags)} bags<br><small>${p.voidReason || 'Removed'}</small></span><button class="btn btn-ghost btn-sm" onclick="restoreProd('${p.id}')">Restore</button></div>`).join('')}
+      </div>` : '<div class="empty-state"><p>No removed production records.</p></div>');
+  }
 }
 
 function submitProduction() {
@@ -283,21 +358,48 @@ function submitProduction() {
   const notes = document.getElementById('p-notes').value.trim();
   if (!roll||!bags||!date) return showToast('Fill in all required fields','error');
   if (bags<1)              return showToast('Bags must be at least 1','error');
-  DB.add('productions',{id:uuid(),date,roll,bags,notes,createdAt:Date.now()});
+  if (editingProductionId) {
+    DB.update('productions', editingProductionId, {date,roll,bags,notes}, 'Production correction');
+  } else {
+    DB.add('productions',{id:uuid(),date,roll,bags,notes,createdAt:Date.now()});
+  }
   closeModal('modal-prod');
+  editingProductionId = null;
   document.getElementById('p-bags').value='';
   document.getElementById('p-notes').value='';
-  showToast('✅ Production recorded!','success');
+  showToast('✅ Production saved safely!','success');
   if (currentSection==='production') renderProduction();
   if (currentSection==='dashboard')  renderDashboard();
 }
 
+function openProductionEditor(id) {
+  const record = id ? DB.get('productions').find(p=>p.id===id) : null;
+  editingProductionId = id || null;
+  document.getElementById('p-date').value = record ? record.date : today();
+  document.getElementById('p-roll').value = record ? record.roll : '';
+  document.getElementById('p-bags').value = record ? record.bags : '';
+  document.getElementById('p-notes').value = record ? record.notes || '' : '';
+  document.querySelector('#modal-prod .modal-title').textContent = record ? '✏️ Correct Production' : '🏭 Record Production';
+  document.querySelector('#modal-prod .btn-primary').textContent = record ? '✅ Save Correction' : '✅ Save Production';
+  openModal('modal-prod');
+}
+
 function deleteProd(id) {
-  if (confirm('Delete this production record?')) {
-    DB.remove('productions',id);
-    showToast('Deleted','error');
+  const reason = prompt('Why should this record be removed from active production? It can be restored later.');
+  if (reason && reason.trim()) {
+    DB.remove('productions',id,reason.trim());
+    showToast('Removed safely. Original record is retained.','error');
     renderProduction();
     if (currentSection==='dashboard') renderDashboard();
+  }
+}
+
+function restoreProd(id) {
+  const reason = prompt('Why is this production record being restored?');
+  if (reason && reason.trim()) {
+    DB.restore('productions', id, reason.trim());
+    showToast('Production record restored.','success');
+    renderProduction();
   }
 }
 
@@ -1000,6 +1102,22 @@ function clearAllData() {
   }
 }
 
+async function connectDevice() {
+  const apiUrl = document.getElementById('sync-url').value.trim();
+  const username = document.getElementById('sync-username').value.trim();
+  const password = document.getElementById('sync-password').value;
+  if (!apiUrl || !username || !password) return showToast('Enter the system address, username and password.','error');
+  try {
+    await Sync.login(apiUrl, username, password);
+    document.getElementById('sync-password').value='';
+    closeModal('modal-sync');
+    showToast('✅ Device connected. Local records are syncing.','success');
+    renderSection(currentSection);
+  } catch (error) {
+    showToast(error.message || 'Could not connect. Your local records are safe.','error');
+  }
+}
+
 // ===========================
 // SERVICE WORKER
 // ===========================
@@ -1191,4 +1309,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   updateNavBadges();
   navigate('dashboard');
   handleOnlineStatus();
+  Sync.renderStatus();
+  Sync.sync();
 });
