@@ -134,6 +134,14 @@ body::before {
 }
 .card:active { transform: scale(0.99); }
 .card.glow { box-shadow: var(--shadow), var(--shadow-blue); }
+.install-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: rgba(0, 229, 255, 0.35);
+  background: linear-gradient(135deg, rgba(21,101,192,0.18), rgba(0,180,216,0.08));
+}
 
 /* ===== STAT GRID ===== */
 .stat-grid {

@@ -28,6 +28,9 @@ function formatDate(d) {
 }
 function formatNum(n)   { return (n||0).toLocaleString(); }
 function formatMoney(n) { return 'GH₵ ' + parseFloat(n||0).toFixed(2); }
+function isStandaloneApp() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
 
 // ===== DATA LAYER =====
 const DB = {
@@ -242,6 +245,15 @@ function renderDashboard() {
         <button class="btn btn-cyan btn-sm" onclick="Sync.sync()">Sync now</button>
       </span>
     </div>
+
+    ${isStandaloneApp() ? '' : `
+    <div class="card install-card">
+      <div>
+        <div style="font-family:var(--font-main);font-size:16px;font-weight:700;color:var(--blue-light);">📲 Install NSUPURE</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Add it to your home screen for faster, offline access.</div>
+      </div>
+      <button class="btn btn-cyan btn-sm" onclick="installApp()">Install</button>
+    </div>`}
 
     ${todayProd>0 ? `
     <div class="card">
