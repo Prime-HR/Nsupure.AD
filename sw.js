@@ -1,8 +1,9 @@
-const CACHE_NAME = 'nsupure-v2';
+const CACHE_NAME = 'nsupure-v3';
 const ASSETS = [
   './index.html',
   './style.css',
   './app.js',
+  './sync.js',
   './manifest.json',
   './icon.svg'
 ];

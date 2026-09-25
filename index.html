@@ -69,6 +69,19 @@
   <section id="sec-finance"    class="section"><div style="text-align:center;padding:40px;color:var(--text-muted)">Loading...</div></section>
 </main>
 
+<div id="modal-sync" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">☁️ Connect this device</div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:14px;">Your records stay on this device first. Signing in links them to the NSUPURE server when internet is available.</p>
+    <div class="form-group"><label class="form-label">System address</label><input type="url" class="form-input" id="sync-url" placeholder="https://your-nsupure-address"></div>
+    <div class="form-group"><label class="form-label">Username</label><input type="text" class="form-input" id="sync-username" autocomplete="username"></div>
+    <div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="sync-password" autocomplete="current-password"></div>
+    <button class="btn btn-primary" onclick="connectDevice()">Connect and sync</button>
+    <button class="btn btn-ghost btn-primary" onclick="closeModal('modal-sync')" style="background:transparent;border:1px solid var(--card-border);margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
   <button class="nav-item active" data-sec="dashboard"  onclick="navigate('dashboard')"><span class="nav-icon">🏠</span><span class="nav-label">HOME</span></button>
@@ -261,6 +274,7 @@
   </div>
 </div>
 
+<script src="sync.js"></script>
 <script src="app.js"></script>
 <script>
 // ===== PWA INSTALL PROMPT =====
