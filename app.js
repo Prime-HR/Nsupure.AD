@@ -35,7 +35,7 @@ function isStandaloneApp() {
 // ===== DATA LAYER =====
 const DB = {
   KEY: 'nsupure_v1',
-  VERSION: 4,
+  VERSION: 5,
   load() {
     try {
       const r = localStorage.getItem(this.KEY);
@@ -81,6 +81,17 @@ const DB = {
       }));
       safe.schemaVersion = 4;
       this.audit(safe, 'MIGRATION', 'customer-register', 'v4', 'Corrected opening quantities: they are cages out, not water sent.');
+      localStorage.setItem(this.KEY, JSON.stringify(safe));
+      return safe;
+    }
+    if (data.schemaVersion < 5) {
+      safe.customers = safe.customers.map(customer =>
+        customer.customerCode === 'PURE13' || customer.name === 'Sir George'
+          ? { ...customer, cagesGiven: 50, updatedAt: Date.now() }
+          : customer
+      );
+      safe.schemaVersion = 5;
+      this.audit(safe, 'MIGRATION', 'customer-register', 'v5', 'Corrected Sir George cage balance to 50 cages out.');
       localStorage.setItem(this.KEY, JSON.stringify(safe));
       return safe;
     }
@@ -134,7 +145,7 @@ function cageRegisterCustomers() {
   const opening = [
     ['May',20], ['Barlow',20], ['Dorah Sister',20], ['Roman School Junction',20],
     ['Chop Bar',20], ['Agyewaa',20], ['Makua',20], ['PapiKojo Sister',10],
-    ['3Sister',10], ['Bedsheet Seller',10], ['Shallout',20], ['Akua School Junction',10], ['Sir George',30]
+    ['3Sister',10], ['Bedsheet Seller',10], ['Shallout',20], ['Akua School Junction',10], ['Sir George',50]
   ];
   return opening.map(([name, cagesGiven], index) => ({
     id: uuid(), customerCode: `PURE${index + 1}`, name, phone: '', cagesGiven,
