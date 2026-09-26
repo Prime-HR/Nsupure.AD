@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nsupure-v6';
+const CACHE_NAME = 'nsupure-v7';
 const ASSETS = [
   './index.html',
   './style.css',

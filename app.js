@@ -35,7 +35,7 @@ function isStandaloneApp() {
 // ===== DATA LAYER =====
 const DB = {
   KEY: 'nsupure_v1',
-  VERSION: 3,
+  VERSION: 4,
   load() {
     try {
       const r = localStorage.getItem(this.KEY);
@@ -67,6 +67,20 @@ const DB = {
       safe.customerTransactions = [];
       safe.schemaVersion = 3;
       this.audit(safe, 'MIGRATION', 'customer-register', 'v3', 'Archived previous customer and order records; created PURE customer cage register.');
+      localStorage.setItem(this.KEY, JSON.stringify(safe));
+      return safe;
+    }
+    if (data.schemaVersion < 4) {
+      // The supplied opening figures describe cages, not water. Preserve any later
+      // water-delivery updates while moving those opening figures to cage balances.
+      safe.customers = safe.customers.map(customer => ({
+        ...customer,
+        cagesGiven: customer.openingWaterBags > 0 ? customer.openingWaterBags : (customer.cagesGiven || 0),
+        openingWaterBags: 0,
+        updatedAt: Date.now()
+      }));
+      safe.schemaVersion = 4;
+      this.audit(safe, 'MIGRATION', 'customer-register', 'v4', 'Corrected opening quantities: they are cages out, not water sent.');
       localStorage.setItem(this.KEY, JSON.stringify(safe));
       return safe;
     }
@@ -122,9 +136,9 @@ function cageRegisterCustomers() {
     ['Chop Bar',20], ['Agyewaa',20], ['Makua',20], ['PapiKojo Sister',10],
     ['3Sister',10], ['Bedsheet Seller',10], ['Shallout',20], ['Akua School Junction',10], ['Sir George',30]
   ];
-  return opening.map(([name, waterBags], index) => ({
-    id: uuid(), customerCode: `PURE${index + 1}`, name, phone: '', cagesGiven: 1,
-    openingWaterBags: waterBags, createdAt: Date.now(), updatedAt: Date.now(), version: 1
+  return opening.map(([name, cagesGiven], index) => ({
+    id: uuid(), customerCode: `PURE${index + 1}`, name, phone: '', cagesGiven,
+    openingWaterBags: 0, createdAt: Date.now(), updatedAt: Date.now(), version: 1
   }));
 }
 
@@ -788,15 +802,13 @@ function submitCustomer() {
   const name  = document.getElementById('c-name').value.trim();
   const phone = document.getElementById('c-phone').value.trim();
   const cagesGiven = Math.max(0, parseInt(document.getElementById('c-cages').value || '0'));
-  const openingWaterBags = Math.max(0, parseInt(document.getElementById('c-opening-water').value || '0'));
   if (!name) return showToast('Customer name is required','error');
   const nextNumber = DB.get('customers').reduce((max, c) => Math.max(max, parseInt((c.customerCode || '').replace('PURE','')) || 0), 0) + 1;
-  DB.add('customers',{id:uuid(),customerCode:`PURE${nextNumber}`,name,phone,cagesGiven,openingWaterBags,createdAt:Date.now()});
+  DB.add('customers',{id:uuid(),customerCode:`PURE${nextNumber}`,name,phone,cagesGiven,openingWaterBags:0,createdAt:Date.now()});
   closeModal('modal-customer');
   document.getElementById('c-name').value='';
   document.getElementById('c-phone').value='';
   document.getElementById('c-cages').value='1';
-  document.getElementById('c-opening-water').value='0';
   showToast('✅ Customer added!','success');
   if (currentSection==='orders') renderOrders();
 }
