@@ -9,6 +9,7 @@ const BACKUP_EMAIL = 'nsupure.adumasa@gmail.com';
 const WA_NUMBERS = ['233248837001', '233551086492', '233249737654'];
 const WA_NAMES   = ['Main Line', 'Line 2', 'Line 3'];
 const HANDOVER_WHATSAPP = '233248837001'; // 0248837001 in international format
+const CUSTOMER_WATER_PRICE = 7;
 
 // ===== UTILS =====
 function uuid() { return Date.now().toString(36) + Math.random().toString(36).substr(2,9); }
@@ -253,6 +254,7 @@ function renderDashboard() {
   const globalStock= computeGlobalStock();
   const pendingOrders = orders.filter(o=>o.status==='pending').length;
   const totalDebt  = debtors.filter(d=>!d.settled&&d.type==='owes_money').reduce((s,d)=>s+d.amount,0);
+  const customerSales = totalCustomerSales();
 
   const loadPct = todayProd>0 ? Math.min(100,Math.round(todayLoad/todayProd*100)) : 0;
 
@@ -285,8 +287,8 @@ function renderDashboard() {
         <div class="stat-label">Total In Stock</div>
       </div>
       <div class="stat-card orange">
-        <div class="stat-value">${pendingOrders}</div>
-        <div class="stat-label">Pending Orders</div>
+        <div class="stat-value" style="font-size:20px;">${formatMoney(customerSales)}</div>
+        <div class="stat-label">Customer Sales</div>
       </div>
     </div>
 
@@ -718,6 +720,7 @@ function renderCustomerCards(customers) {
         <div class="list-item-meta">
           <span>💧 ${formatNum(summary.waterSent)} bags sent</span>
           <span>🧺 ${formatNum(summary.cagesOut)} cage${summary.cagesOut===1?'':'s'} out</span>
+          <span>💰 ${formatMoney(summary.sales)}</span>
         </div>
       </div>`;
   }).join('');
@@ -727,7 +730,12 @@ function customerSummary(customer) {
   const entries = DB.get('customerTransactions').filter(t => t.customerId === customer.id);
   const waterSent = (customer.openingWaterBags || 0) + entries.filter(t => t.type === 'water_sent').reduce((sum, t) => sum + (t.bags || 0), 0);
   const cagesOut = Math.max(0, (customer.cagesGiven || 0) - entries.filter(t => t.type === 'cage_returned').reduce((sum, t) => sum + (t.cages || 0), 0));
-  return { entries, waterSent, cagesOut };
+  const sales = entries.filter(t => t.type === 'water_sent').reduce((sum, t) => sum + (t.bags || 0) * (t.pricePerBag || CUSTOMER_WATER_PRICE), 0);
+  return { entries, waterSent, cagesOut, sales };
+}
+
+function totalCustomerSales() {
+  return DB.get('customers').reduce((sum, customer) => sum + customerSummary(customer).sales, 0);
 }
 
 function openCustomerFolder(id) {
@@ -743,6 +751,7 @@ function openCustomerFolder(id) {
       ${customer.phone ? `<div class="list-item-sub">📞 ${customer.phone}</div>` : '<div class="list-item-sub">No phone number saved</div>'}
       <div class="summary-box" style="margin-top:12px;">
         <div class="summary-row"><span class="label">Water sent</span><span class="value">${formatNum(summary.waterSent)} bags</span></div>
+        <div class="summary-row"><span class="label">Sales at ${formatMoney(CUSTOMER_WATER_PRICE)} / bag</span><span class="value" style="color:var(--success)">${formatMoney(summary.sales)}</span></div>
         <div class="summary-row"><span class="label">Cages out</span><span class="value">${formatNum(summary.cagesOut)}</span></div>
       </div>
       <div class="list-item-actions" style="margin-top:12px;">
@@ -751,7 +760,7 @@ function openCustomerFolder(id) {
       </div>
     </div>
     <div class="report-title" style="margin:16px 0 10px;">🗂 Record history</div>
-    ${history.length ? history.map(t => `<div class="list-item"><div class="list-item-header"><strong>${t.type==='water_sent'?'💧 Water sent':t.type==='cage_returned'?'🧺 Cage returned':'📝 Note'}</strong><span>${formatDate(t.date)}</span></div><div class="list-item-meta">${t.bags?`<span>${formatNum(t.bags)} bags</span>`:''}${t.cages?`<span>${formatNum(t.cages)} cage${t.cages===1?'':'s'}</span>`:''}${t.note?`<span>📝 ${t.note}</span>`:''}</div><div class="list-item-actions"><button class="btn btn-danger btn-sm" onclick="deleteCustomerTransaction('${t.id}','${customer.id}')">Remove</button></div></div>`).join('') : '<div class="empty-state"><p>No updates yet. Opening water is included above.</p></div>'}
+    ${history.length ? history.map(t => `<div class="list-item"><div class="list-item-header"><strong>${t.type==='water_sent'?'💧 Water sent':t.type==='cage_returned'?'🧺 Cage returned':'📝 Note'}</strong><span>${formatDate(t.date)}</span></div><div class="list-item-meta">${t.bags?`<span>${formatNum(t.bags)} bags × ${formatMoney(t.pricePerBag || CUSTOMER_WATER_PRICE)} = ${formatMoney(t.bags * (t.pricePerBag || CUSTOMER_WATER_PRICE))}</span>`:''}${t.cages?`<span>${formatNum(t.cages)} cage${t.cages===1?'':'s'}</span>`:''}${t.note?`<span>📝 ${t.note}</span>`:''}</div><div class="list-item-actions"><button class="btn btn-danger btn-sm" onclick="deleteCustomerTransaction('${t.id}','${customer.id}')">Remove</button></div></div>`).join('') : '<div class="empty-state"><p>No water deliveries recorded yet.</p></div>'}
   `;
 }
 
@@ -866,7 +875,7 @@ function submitCustomerTransaction() {
   if (type === 'water_sent' && bags < 1) return showToast('Enter the bags sent.','error');
   if (type === 'cage_returned' && cages < 1) return showToast('Enter the cages returned.','error');
   if (type === 'note' && !note) return showToast('Enter a note.','error');
-  DB.add('customerTransactions', { id:uuid(), customerId, type, date, bags:type==='water_sent'?bags:0, cages:type==='cage_returned'?cages:0, note, createdAt:Date.now() });
+  DB.add('customerTransactions', { id:uuid(), customerId, type, date, bags:type==='water_sent'?bags:0, pricePerBag:type==='water_sent'?CUSTOMER_WATER_PRICE:0, cages:type==='cage_returned'?cages:0, note, createdAt:Date.now() });
   closeModal('modal-customer-transaction');
   showToast('Customer record updated.','success');
   openCustomerFolder(customerId);
@@ -1240,10 +1249,10 @@ function buildAllRecordsText() {
   add('DEBTORS / CREDIT', active('debtors').filter(d => !d.settled), d => `${formatDate(d.date)} | ${d.name} | ${d.type === 'owes_money' ? formatMoney(d.amount) : `${formatNum(d.bags)} bags`}${d.description ? ` | ${d.description}` : ''}`);
   add('CUSTOMERS', active('customers'), c => {
     const summary = customerSummary(c);
-    return `${c.customerCode || 'PURE?'} | ${c.name}${c.phone ? ` | ${c.phone}` : ''} | ${formatNum(summary.waterSent)} bags sent | ${formatNum(summary.cagesOut)} cage(s) out`;
+    return `${c.customerCode || 'PURE?'} | ${c.name}${c.phone ? ` | ${c.phone}` : ''} | ${formatNum(summary.waterSent)} bags sent | ${formatMoney(summary.sales)} sales | ${formatNum(summary.cagesOut)} cage(s) out`;
   });
   add('CUSTOMER FOLDER UPDATES', active('customerTransactions'), t => `${formatDate(t.date)} | ${t.type.replace('_',' ')}${t.bags ? ` | ${formatNum(t.bags)} bags` : ''}${t.cages ? ` | ${formatNum(t.cages)} cage(s)` : ''}${t.note ? ` | ${t.note}` : ''}`);
-  lines.push('\n━━━━━━━━━━━━━━━━━━━━', `Current stock: *${formatNum(computeGlobalStock())} bags*`, 'Prepared by NSUPURE Manager');
+  lines.push('\n━━━━━━━━━━━━━━━━━━━━', `Customer sales: *${formatMoney(totalCustomerSales())}*`, `Current stock: *${formatNum(computeGlobalStock())} bags*`, 'Prepared by NSUPURE Manager');
   return lines.join('\n');
 }
 
