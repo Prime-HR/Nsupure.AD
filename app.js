@@ -35,7 +35,7 @@ function isStandaloneApp() {
 // ===== DATA LAYER =====
 const DB = {
   KEY: 'nsupure_v1',
-  VERSION: 2,
+  VERSION: 3,
   load() {
     try {
       const r = localStorage.getItem(this.KEY);
@@ -48,12 +48,28 @@ const DB = {
     }
   },
   save(data) { localStorage.setItem(this.KEY, JSON.stringify(data)); updateNavBadges(); },
-  defaultData() { return { schemaVersion:this.VERSION, productions:[], loadings:[], customers:[], orders:[], debtors:[], audit:[], lastBackup:null }; },
+  defaultData() { return { schemaVersion:this.VERSION, productions:[], loadings:[], customers:[], orders:[], debtors:[], customerTransactions:[], legacyArchive:null, audit:[], lastBackup:null }; },
   migrate(data) {
     const safe = { ...this.defaultData(), ...data };
-    ['productions','loadings','customers','orders','debtors','audit'].forEach(key => {
+    ['productions','loadings','customers','orders','debtors','customerTransactions','audit'].forEach(key => {
       if (!Array.isArray(safe[key])) safe[key] = [];
     });
+    if (!data.schemaVersion || data.schemaVersion < 3) {
+      // Keep the old list in the device backup instead of silently losing it.
+      safe.legacyArchive = safe.legacyArchive || {
+        archivedAt: Date.now(),
+        customers: safe.customers,
+        orders: safe.orders,
+        reason: 'Replaced by the customer cage register'
+      };
+      safe.customers = cageRegisterCustomers();
+      safe.orders = [];
+      safe.customerTransactions = [];
+      safe.schemaVersion = 3;
+      this.audit(safe, 'MIGRATION', 'customer-register', 'v3', 'Archived previous customer and order records; created PURE customer cage register.');
+      localStorage.setItem(this.KEY, JSON.stringify(safe));
+      return safe;
+    }
     if (!data.schemaVersion || data.schemaVersion < this.VERSION) {
       safe.schemaVersion = this.VERSION;
       safe.audit.unshift({ id:uuid(), action:'MIGRATION', entity:'database', at:Date.now(), note:'Upgraded local records to recoverable deletion format.' });
@@ -99,6 +115,18 @@ const DB = {
   },
   setMeta(key,val) { const d=this.load(); d[key]=val; this.save(d); }
 };
+
+function cageRegisterCustomers() {
+  const opening = [
+    ['May',20], ['Barlow',20], ['Dorah Sister',20], ['Roman School Junction',20],
+    ['Chop Bar',20], ['Agyewaa',20], ['Makua',20], ['PapiKojo Sister',10],
+    ['3Sister',10], ['Bedsheet Seller',10], ['Shallout',20], ['Akua School Junction',10], ['Sir George',30]
+  ];
+  return opening.map(([name, waterBags], index) => ({
+    id: uuid(), customerCode: `PURE${index + 1}`, name, phone: '', cagesGiven: 1,
+    openingWaterBags: waterBags, createdAt: Date.now(), updatedAt: Date.now(), version: 1
+  }));
+}
 
 // ===== GLOBAL STOCK COMPUTATION =====
 // Stock = totalProduced - totalLoadedOut - totalFulfilled order bags
@@ -150,9 +178,8 @@ function renderSection(s) {
   }
 }
 function updateNavBadges() {
-  const pending = DB.get('orders').filter(o=>o.status==='pending').length;
   const badge = document.getElementById('orders-badge');
-  if (badge) { badge.textContent=pending; badge.style.display=pending>0?'flex':'none'; }
+  if (badge) badge.style.display='none';
   // Update header stock
   const stockEl = document.getElementById('header-stock');
   if (stockEl) stockEl.textContent = '📦 Stock: ' + formatNum(computeGlobalStock()) + ' bags';
@@ -528,10 +555,8 @@ let ordersTab = 'orders';
 let orderFilterDate = '';
 
 function renderOrders() {
-  const orders    = DB.get('orders');
   const customers = DB.get('customers');
-  if (ordersTab==='orders')    renderOrdersList(orders, customers);
-  else                         renderCustomersList(customers);
+  renderCustomersList(customers);
 }
 
 function renderOrdersList(orders, customers) {
@@ -628,11 +653,8 @@ function setOrderDateFilter(val) {
 
 function renderCustomersList(customers) {
   document.getElementById('sec-orders').innerHTML = `
-    <div class="section-title"><span class="icon">📋</span> Orders & Customers</div>
-    <div class="tabs">
-      <button class="tab-btn"        onclick="ordersTab='orders';renderOrders()">📦 Orders</button>
-      <button class="tab-btn active" onclick="ordersTab='customers';renderOrders()">👥 Customers</button>
-    </div>
+    <div class="section-title"><span class="icon">👥</span> Customer Cage Register</div>
+    <div class="card" style="padding:12px 14px;color:var(--text-dim);font-size:13px;">Each customer has a PURE ID, cage balance and editable water history. Tap a customer to open their folder.</div>
 
     <button class="btn btn-primary" onclick="openModal('modal-customer')" style="margin-bottom:14px;">
       ➕ Add Customer
@@ -658,30 +680,54 @@ function filterMainCustomerList(q) {
 function renderCustomerCards(customers) {
   if (!customers.length) return `<div class="empty-state"><div class="empty-icon">👥</div><p>No customers found.</p></div>`;
   return customers.map(c=>{
-    const custOrders = DB.get('orders').filter(o=>o.customerId===c.id);
-    const pending    = custOrders.filter(o=>o.status==='pending').length;
-    const totalBags  = custOrders.reduce((s,o)=>s+o.bags,0);
+    const summary = customerSummary(c);
     return `
-      <div class="list-item">
+      <div class="list-item" style="cursor:pointer" onclick="openCustomerFolder('${c.id}')">
         <div class="list-item-header">
           <div>
-            <div class="list-item-title">👤 ${c.name}</div>
+            <div class="list-item-title">👤 ${c.name} <span class="badge badge-pending">${c.customerCode || 'PURE?'}</span></div>
             ${c.phone?`<div class="list-item-sub">📞 ${c.phone}</div>`:''}
           </div>
-          <div style="text-align:right">
-            ${pending>0?`<span class="badge badge-pending">${pending} pending</span>`:''}
-          </div>
+          <span style="font-size:22px;color:var(--cyan)">›</span>
         </div>
         <div class="list-item-meta">
-          <span>📦 ${formatNum(totalBags)} total bags</span>
-          <span>📋 ${custOrders.length} orders</span>
-        </div>
-        <div class="list-item-actions">
-          <button class="btn btn-cyan btn-sm" onclick="quickOrder('${c.id}','${c.name.replace(/'/g,"\\'")}','${c.phone||''}')">📦 Order</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteCustomer('${c.id}')">🗑 Remove</button>
+          <span>💧 ${formatNum(summary.waterSent)} bags sent</span>
+          <span>🧺 ${formatNum(summary.cagesOut)} cage${summary.cagesOut===1?'':'s'} out</span>
         </div>
       </div>`;
   }).join('');
+}
+
+function customerSummary(customer) {
+  const entries = DB.get('customerTransactions').filter(t => t.customerId === customer.id);
+  const waterSent = (customer.openingWaterBags || 0) + entries.filter(t => t.type === 'water_sent').reduce((sum, t) => sum + (t.bags || 0), 0);
+  const cagesOut = Math.max(0, (customer.cagesGiven || 0) - entries.filter(t => t.type === 'cage_returned').reduce((sum, t) => sum + (t.cages || 0), 0));
+  return { entries, waterSent, cagesOut };
+}
+
+function openCustomerFolder(id) {
+  const customer = DB.get('customers').find(c => c.id === id);
+  if (!customer) return showToast('Customer record was not found.','error');
+  const summary = customerSummary(customer);
+  const history = summary.entries.sort((a,b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
+  document.getElementById('sec-orders').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="renderOrders()" style="margin-bottom:12px;">← All customers</button>
+    <div class="section-title"><span class="icon">📁</span> ${customer.customerCode || 'PURE?'}</div>
+    <div class="card">
+      <div class="list-item-title">👤 ${customer.name}</div>
+      ${customer.phone ? `<div class="list-item-sub">📞 ${customer.phone}</div>` : '<div class="list-item-sub">No phone number saved</div>'}
+      <div class="summary-box" style="margin-top:12px;">
+        <div class="summary-row"><span class="label">Water sent</span><span class="value">${formatNum(summary.waterSent)} bags</span></div>
+        <div class="summary-row"><span class="label">Cages out</span><span class="value">${formatNum(summary.cagesOut)}</span></div>
+      </div>
+      <div class="list-item-actions" style="margin-top:12px;">
+        <button class="btn btn-cyan btn-sm" onclick="openCustomerTransaction('${customer.id}')">➕ Update record</button>
+        <button class="btn btn-warning btn-sm" onclick="editCustomer('${customer.id}')">✏️ Edit</button>
+      </div>
+    </div>
+    <div class="report-title" style="margin:16px 0 10px;">🗂 Record history</div>
+    ${history.length ? history.map(t => `<div class="list-item"><div class="list-item-header"><strong>${t.type==='water_sent'?'💧 Water sent':t.type==='cage_returned'?'🧺 Cage returned':'📝 Note'}</strong><span>${formatDate(t.date)}</span></div><div class="list-item-meta">${t.bags?`<span>${formatNum(t.bags)} bags</span>`:''}${t.cages?`<span>${formatNum(t.cages)} cage${t.cages===1?'':'s'}</span>`:''}${t.note?`<span>📝 ${t.note}</span>`:''}</div><div class="list-item-actions"><button class="btn btn-danger btn-sm" onclick="deleteCustomerTransaction('${t.id}','${customer.id}')">Remove</button></div></div>`).join('') : '<div class="empty-state"><p>No updates yet. Opening water is included above.</p></div>'}
+  `;
 }
 
 // ===========================
@@ -741,13 +787,73 @@ function selectCustomer(id, name, phone) {
 function submitCustomer() {
   const name  = document.getElementById('c-name').value.trim();
   const phone = document.getElementById('c-phone').value.trim();
+  const cagesGiven = Math.max(0, parseInt(document.getElementById('c-cages').value || '0'));
+  const openingWaterBags = Math.max(0, parseInt(document.getElementById('c-opening-water').value || '0'));
   if (!name) return showToast('Customer name is required','error');
-  DB.add('customers',{id:uuid(),name,phone,createdAt:Date.now()});
+  const nextNumber = DB.get('customers').reduce((max, c) => Math.max(max, parseInt((c.customerCode || '').replace('PURE','')) || 0), 0) + 1;
+  DB.add('customers',{id:uuid(),customerCode:`PURE${nextNumber}`,name,phone,cagesGiven,openingWaterBags,createdAt:Date.now()});
   closeModal('modal-customer');
   document.getElementById('c-name').value='';
   document.getElementById('c-phone').value='';
+  document.getElementById('c-cages').value='1';
+  document.getElementById('c-opening-water').value='0';
   showToast('✅ Customer added!','success');
   if (currentSection==='orders') renderOrders();
+}
+
+function editCustomer(id) {
+  const customer = DB.get('customers').find(c => c.id === id);
+  if (!customer) return;
+  const name = prompt('Customer name:', customer.name);
+  if (name === null || !name.trim()) return;
+  const phone = prompt('Phone number:', customer.phone || '');
+  if (phone === null) return;
+  const cages = prompt('Cages given:', customer.cagesGiven || 0);
+  if (cages === null || isNaN(cages) || Number(cages) < 0) return showToast('Enter a valid cage number.','error');
+  DB.update('customers', id, { name:name.trim(), phone:phone.trim(), cagesGiven:Number(cages) }, 'Updated customer folder');
+  showToast('Customer folder updated.','success');
+  openCustomerFolder(id);
+}
+
+function openCustomerTransaction(customerId) {
+  document.getElementById('ct-customer-id').value = customerId;
+  document.getElementById('ct-date').value = today();
+  document.getElementById('ct-type').value = 'water_sent';
+  document.getElementById('ct-bags').value = '';
+  document.getElementById('ct-cages').value = '';
+  document.getElementById('ct-note').value = '';
+  toggleCustomerTransactionFields();
+  openModal('modal-customer-transaction');
+}
+
+function toggleCustomerTransactionFields() {
+  const type = document.getElementById('ct-type').value;
+  document.getElementById('ct-bags-wrap').style.display = type === 'water_sent' ? 'block' : 'none';
+  document.getElementById('ct-cages-wrap').style.display = type === 'cage_returned' ? 'block' : 'none';
+}
+
+function submitCustomerTransaction() {
+  const customerId = document.getElementById('ct-customer-id').value;
+  const type = document.getElementById('ct-type').value;
+  const date = document.getElementById('ct-date').value;
+  const bags = parseInt(document.getElementById('ct-bags').value || '0');
+  const cages = parseInt(document.getElementById('ct-cages').value || '0');
+  const note = document.getElementById('ct-note').value.trim();
+  if (!customerId || !date) return showToast('Choose a date.','error');
+  if (type === 'water_sent' && bags < 1) return showToast('Enter the bags sent.','error');
+  if (type === 'cage_returned' && cages < 1) return showToast('Enter the cages returned.','error');
+  if (type === 'note' && !note) return showToast('Enter a note.','error');
+  DB.add('customerTransactions', { id:uuid(), customerId, type, date, bags:type==='water_sent'?bags:0, cages:type==='cage_returned'?cages:0, note, createdAt:Date.now() });
+  closeModal('modal-customer-transaction');
+  showToast('Customer record updated.','success');
+  openCustomerFolder(customerId);
+}
+
+function deleteCustomerTransaction(id, customerId) {
+  if (!confirm('Remove this customer history entry? It can be restored from your JSON backup.')) return;
+  DB.remove('customerTransactions', id, 'Removed from customer folder');
+  showToast('History entry removed.','success');
+  openCustomerFolder(customerId);
 }
 
 function deleteCustomer(id) {
@@ -1109,14 +1215,18 @@ function buildAllRecordsText() {
   add('LOADING', active('loadings'), l => `${formatDate(l.date)} | ${l.vehicle} | ${formatNum(l.bags)} bags${l.destination ? ` → ${l.destination}` : ''}${l.notes ? ` | ${l.notes}` : ''}`);
   add('ORDERS', active('orders'), o => `${formatDate(o.date)} | ${o.customerName} | ${formatNum(o.bags)} bags | ${o.status} | paid ${formatMoney(o.amountPaid)}`);
   add('DEBTORS / CREDIT', active('debtors').filter(d => !d.settled), d => `${formatDate(d.date)} | ${d.name} | ${d.type === 'owes_money' ? formatMoney(d.amount) : `${formatNum(d.bags)} bags`}${d.description ? ` | ${d.description}` : ''}`);
-  add('CUSTOMERS', active('customers'), c => `${c.name}${c.phone ? ` | ${c.phone}` : ''}`);
+  add('CUSTOMERS', active('customers'), c => {
+    const summary = customerSummary(c);
+    return `${c.customerCode || 'PURE?'} | ${c.name}${c.phone ? ` | ${c.phone}` : ''} | ${formatNum(summary.waterSent)} bags sent | ${formatNum(summary.cagesOut)} cage(s) out`;
+  });
+  add('CUSTOMER FOLDER UPDATES', active('customerTransactions'), t => `${formatDate(t.date)} | ${t.type.replace('_',' ')}${t.bags ? ` | ${formatNum(t.bags)} bags` : ''}${t.cages ? ` | ${formatNum(t.cages)} cage(s)` : ''}${t.note ? ` | ${t.note}` : ''}`);
   lines.push('\n━━━━━━━━━━━━━━━━━━━━', `Current stock: *${formatNum(computeGlobalStock())} bags*`, 'Prepared by NSUPURE Manager');
   return lines.join('\n');
 }
 
 function shareAllDataToWhatsApp() {
   const data = DB.load();
-  const total = ['productions','loadings','orders','debtors','customers'].reduce((sum, key) => sum + (data[key] || []).filter(item => !item.voidedAt).length, 0);
+  const total = ['productions','loadings','orders','debtors','customers','customerTransactions'].reduce((sum, key) => sum + (data[key] || []).filter(item => !item.voidedAt).length, 0);
   if (!total) return showToast('There are no active records to share yet.','error');
   const text = buildAllRecordsText();
   const maxSafeLength = 55_000;
@@ -1200,6 +1310,11 @@ window.addEventListener('offline', ()=>showToast('📵 Offline mode - Data saved
 function seedCustomers() {
   const existing = DB.get('customers');
   if (existing.length > 0) return;
+  const seedData = DB.load();
+  seedData.customers = cageRegisterCustomers();
+  DB.audit(seedData, 'SEED', 'customer-register', 'initial', 'Created the PURE1–PURE13 customer cage register.');
+  DB.save(seedData);
+  return;
   const defaults = [
   {id:uuid(),name:'30 Bags Adumasa',phone:'0553180935',createdAt:Date.now()},
   {id:uuid(),name:'Abawaa Adumasa Costomer',phone:'0542773752',createdAt:Date.now()},

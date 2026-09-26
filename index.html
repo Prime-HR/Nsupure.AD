@@ -88,7 +88,7 @@
   <button class="nav-item"        data-sec="production" onclick="navigate('production')"><span class="nav-icon">🏭</span><span class="nav-label">PRODUCE</span></button>
   <button class="nav-item"        data-sec="loading"    onclick="navigate('loading')"><span class="nav-icon">🚚</span><span class="nav-label">LOAD</span></button>
   <button class="nav-item"        data-sec="orders"     onclick="navigate('orders')" style="position:relative;">
-    <span class="nav-icon">📦</span><span class="nav-label">ORDERS</span>
+    <span class="nav-icon">👥</span><span class="nav-label">CUSTOMERS</span>
     <span id="orders-badge" class="nav-badge" style="display:none">0</span>
   </button>
   <button class="nav-item"        data-sec="finance"    onclick="navigate('finance')"><span class="nav-icon">💸</span><span class="nav-label">FINANCE</span></button>
@@ -176,8 +176,53 @@
       <label class="form-label">Phone Number</label>
       <input type="tel" class="form-input" id="c-phone" placeholder="e.g. 0244000000">
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Cages Given</label>
+        <input type="number" class="form-input" id="c-cages" value="1" min="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Opening Water Bags</label>
+        <input type="number" class="form-input" id="c-opening-water" value="0" min="0">
+      </div>
+    </div>
     <button class="btn btn-primary" onclick="submitCustomer()">✅ Add Customer</button>
     <button class="btn btn-ghost btn-primary" onclick="closeModal('modal-customer')" style="background:transparent;border:1px solid var(--card-border);margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- ===== MODAL: CUSTOMER FOLDER UPDATE ===== -->
+<div id="modal-customer-transaction" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">📁 Update Customer Folder</div>
+    <input type="hidden" id="ct-customer-id">
+    <div class="form-group">
+      <label class="form-label">Update Type *</label>
+      <select class="form-select" id="ct-type" onchange="toggleCustomerTransactionFields()">
+        <option value="water_sent">💧 Water sent</option>
+        <option value="cage_returned">🧺 Cage returned</option>
+        <option value="note">📝 Note</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Date *</label>
+      <input type="date" class="form-input" id="ct-date">
+    </div>
+    <div class="form-group" id="ct-bags-wrap">
+      <label class="form-label">Water Bags Sent *</label>
+      <input type="number" class="form-input" id="ct-bags" min="1" placeholder="e.g. 20">
+    </div>
+    <div class="form-group" id="ct-cages-wrap">
+      <label class="form-label">Cages Returned *</label>
+      <input type="number" class="form-input" id="ct-cages" min="1" placeholder="e.g. 1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Note</label>
+      <input type="text" class="form-input" id="ct-note" placeholder="Optional detail">
+    </div>
+    <button class="btn btn-primary" onclick="submitCustomerTransaction()">✅ Save Update</button>
+    <button class="btn btn-ghost btn-primary" onclick="closeModal('modal-customer-transaction')" style="background:transparent;border:1px solid var(--card-border);margin-top:8px;">Cancel</button>
   </div>
 </div>
 
